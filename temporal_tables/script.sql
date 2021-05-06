@@ -5,7 +5,7 @@ SELECT
 	@@VERSION;
 GO
 
--- SQL Operations Studio tip: select the whole column
+-- Azure Data Studio tip: select the whole column
 -- and double-click on the right to expand it out.
 
 -- Reset demo
@@ -36,7 +36,9 @@ WITH (SYSTEM_VERSIONING = ON);
 GO
 
 -- Have a look at the temporal table in the Object Explorer
+
 -- Note the history table name and schema
+-- Note the default PAGE compression
 
 -- Query to show that the table is PAGE compressed by default
 SELECT SCHEMA_NAME(sys.objects.schema_id) AS [SchemaName],
@@ -77,7 +79,7 @@ SELECT * FROM dbo.Employee;
 -- Note that the PERIOD columns are included
 
 -- Lorraine gets married
--- Patriarchy says change your name!
+-- 1950s patriarchy says change your name!
 UPDATE	dbo.Employee
 SET		Name = N'Lorraine McFly'
 WHERE	EmployeeID = 1;
@@ -86,14 +88,13 @@ WHERE	EmployeeID = 1;
 -- (Remember to copy the time)
 SELECT * FROM dbo.Employee;
 
-
 -- Run all SELECTs and walk through each one
 
 -- TODO: Correct these start and end dates and times
-DECLARE @ChangeDate DATETIME2(3) = '2018-02-24 15:07:04.829'; -- actual change
+DECLARE @ChangeDate DATETIME2(3) = '2021-05-05 23:39:14.462'; -- actual change
 
 DECLARE @StartDate DATETIME2(3) = DATEADD(DAY, -1, @ChangeDate);
-DECLARE @EndDate DATETIME2(3) = DATEADD(MILLISECOND, 1, @ChangeDate);
+DECLARE @EndDate DATETIME2(3) = DATEADD(MILLISECOND, 1, @ChangeDate); -- granularity depends on decimals
 DECLARE @AsOfDate DATETIME2(3) = DATEADD(MILLISECOND, -1, @ChangeDate);
 
 -- Current only
@@ -123,6 +124,7 @@ SELECT 'CONTAINED IN' as [Type], * FROM dbo.Employee
 FOR SYSTEM_TIME CONTAINED IN (@StartDate, @EndDate);
 
 -------------
+
 
 
 
@@ -170,9 +172,13 @@ WITH (SYSTEM_VERSIONING = ON (HISTORY_TABLE = History.Employee));
 GO
 
 -- Look at the table in the Object Explorer
+-- if you're using Azure Data Studio, and
+-- use metadata queries to see the objects
 
--- Use metadata queries to see the objects because
--- Operations Studio isn't fully compatible with SSMS
+-- Observe the object properties on the tables involved
+-- 0 = non-temporal table
+-- 1 = history table for system-versioned table
+-- 2 = system-versioned temporal table
 
 -- Observe the object properties on the tables involved
 -- 0 = non-temporal table
@@ -197,9 +203,13 @@ SELECT
 	name as TableName,
 	temporal_type_desc
 FROM
-	sys.tables;
+	sys.tables
+WHERE name <> 'sysdiagrams';
 
 ------------------------------
+
+
+
 
 
 -- Convert existing table to temporal table and specify history table
@@ -297,7 +307,7 @@ WHERE	EmployeeID = 1;
 SELECT *, ValidFrom, ValidTo FROM dbo.Employee;
 
 -- TODO: Correct these start and end dates and times
-DECLARE @ChangeDate DATETIME2(3) = '2018-02-24 15:17:12.772'; -- actual change
+DECLARE @ChangeDate DATETIME2(3) = '2021-05-05 23:54:30.729'; -- actual change
 
 DECLARE @StartDate DATETIME2(3) = DATEADD(DAY, -1, @ChangeDate);
 DECLARE @EndDate DATETIME2(3) = DATEADD(MILLISECOND, 1, @ChangeDate);
@@ -434,11 +444,15 @@ TRUNCATE TABLE dbo.Employee;
 -- Attempt TRUNCATE on history table (will it error?)
 TRUNCATE TABLE History.Employee;
 
--- This is for later
+-- This is for later -- might need a couple of attempts
 CHECKPOINT
 
 -- Attempt ALTER TABLE ALTER COLUMN on current table
 -- (does it change in both tables?)
+CHECKPOINT
+GO
+CHECKPOINT
+GO
 ALTER TABLE dbo.Employee ALTER COLUMN AnnualSalary MONEY NOT NULL;
 
 SELECT * FROM fn_dblog(NULL,NULL)
@@ -461,6 +475,7 @@ FOR SYSTEM_TIME ALL;
 -- What are the implications of these two changes?
 -- Remember the Marketing Slide?
 -- Can this be used for forensic auditing on its own?
+-- Not even the default trace keeps a record of this
 
 -----
 
@@ -494,7 +509,8 @@ GO
 ALTER DATABASE [TemporalDemo]
 	ADD FILE (
 		NAME = N'InMemoryFile',
-		FILENAME = N'/var/opt/mssql/data/InMemoryFile'
+		FILENAME = N'C:\SQL\Data\InMemoryFile'
+		-- FILENAME = N'/var/opt/mssql/data/InMemoryFile' -- Linux
 	)
 TO FILEGROUP [InMemory];
 GO
@@ -583,14 +599,22 @@ SELECT * FROM dbo.Employee;
 
 DELETE FROM dbo.Employee;
 
+-- Using RSCI? Watch out for this problem:
+
+-- A query that accesses memory optimized tables using the READ COMMITTED
+-- isolation level, cannot access disk based tables when the database option
+-- READ_COMMITTED_SNAPSHOT is set to ON. Provide a supported isolation level
+-- for the memory optimized table using a table hint, such as WITH (SNAPSHOT).
+
 SELECT * FROM dbo.Employee
-FOR SYSTEM_TIME ALL;
+FOR SYSTEM_TIME ALL
+WITH (SNAPSHOT); -- Needed for RCSI
 ------
 
 
 
 
--- Periodic archival of current data (temporal rolling window)
+-- Periodic archival of current / historic data (temporal rolling window)
 
 -- Books Online:
 
@@ -632,14 +656,15 @@ COMMIT TRAN;
 
 
 
--- Retention Policy (2017 and Azure SQL Database only)
+-- Retention Policy (2017+ and Azure SQL Database)
 
 -- Check if it retention policy is enabled
 SELECT
 	is_temporal_history_retention_enabled,
 	name
 FROM
-	sys.databases;
+	sys.databases
+WHERE name in ('master', 'msdb', 'tempdb', 'TemporalDemo');
 GO
 
 -- You can change it with ALTER DATABASE statement.
@@ -682,4 +707,3 @@ LEFT JOIN sys.tables T2
 	ON T1.history_table_id = T2.object_id
 WHERE T1.temporal_type = 2;
 GO
-
