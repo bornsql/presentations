@@ -599,7 +599,7 @@ SELECT * FROM dbo.Employee;
 
 DELETE FROM dbo.Employee;
 
--- Using RSCI? Watch out for this problem:
+-- Using RCSI? Watch out for this problem:
 
 -- A query that accesses memory optimized tables using the READ COMMITTED
 -- isolation level, cannot access disk based tables when the database option
